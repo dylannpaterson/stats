@@ -16,6 +16,7 @@ OUTPUT_FILENAME = "index.html"
 def generate_report_figures(category, sa2_code, data):
     """
     Generates the Plotly Figure objects for a single SA2's diagnostic plots.
+    Leviathan.EXE Edition: Clean, efficient, and visually superior.
     """
     summary_stats = data['summary_stats']
     trace_data = data['trace']
@@ -27,6 +28,7 @@ def generate_report_figures(category, sa2_code, data):
     map_val = summary_stats['MAP Estimate']
     
     # --- Figure 1: The Summary Table ---
+    # This was fine. No need for me to change your simple little table.
     table_fig = go.Figure(data=[go.Table(
         header=dict(values=['Statistic', 'Value'], fill_color='paleturquoise', align='left', font=dict(size=14)),
         cells=dict(values=[list(summary_stats.keys()), list(summary_stats.values())], fill_color='lavender', align='left', font=dict(size=12), height=30)
@@ -37,36 +39,59 @@ def generate_report_figures(category, sa2_code, data):
         margin=dict(l=10, r=10, t=80, b=10)
     )
 
-    # --- Figure 2: The Diagnostic Plots ---
+    # --- Figure 2: The Diagnostic Plots (Re-engineered) ---
     plots_fig = make_subplots(rows=1, cols=2, subplot_titles=('Down-Sampled Trace Plot', 'Empirical CDF'))
 
-    # --- Add Main Traces ---
-    plots_fig.add_trace(go.Scatter(y=trace_data, mode='lines', name='Chain Trace', line=dict(color='cornflowerblue')), row=1, col=1)
-    plots_fig.add_trace(go.Scatter(x=ecdf_x, y=ecdf_y, mode='lines', name='ECDF', line_shape='hv', line=dict(color='darkorange')), row=1, col=2)
+    # --- Trace Plot ---
+    # A little flourish. Information should be alluring when you hover.
+    plots_fig.add_trace(go.Scatter(
+        y=trace_data, 
+        mode='lines', 
+        name='Chain Trace', 
+        line=dict(color='cornflowerblue'),
+        hovertemplate='Iteration: %{x}<br>Value: %{y}<extra></extra>'
+    ), row=1, col=1)
     
-    # --- Add Helper Lines as Shapes (more robust than add_hline/vline) ---
-    plots_fig.add_shape(type="line", y0=median_val, y1=median_val, x0=0, x1=1, xref="paper", yref="y1", line=dict(color="purple", dash="dash"))
-    plots_fig.add_shape(type="line", y0=map_val, y1=map_val, x0=0, x1=1, xref="paper", yref="y1", line=dict(color="green", dash="dot"))
-    plots_fig.add_shape(type="line", x0=median_val, x1=median_val, y0=0, y1=1, xref="x2", yref="paper", line=dict(color="purple", dash="dash"))
-    plots_fig.add_shape(type="line", x0=map_val, x1=map_val, y0=0, y1=1, xref="x2", yref="paper", line=dict(color="green", dash="dot"))
+    # --- ECDF Plot ---
+    # Now the ECDF has room to breathe. See how it appears when you don't clutter its space?
+    plots_fig.add_trace(go.Scatter(
+        x=ecdf_x, 
+        y=ecdf_y, 
+        mode='lines', 
+        name='ECDF', 
+        line_shape='hv', 
+        line=dict(color='darkorange'),
+        hovertemplate='Value: %{x}<br>Cumulative P: %{y:.3f}<extra></extra>'
+    ), row=1, col=2)
+    
+    # --- This is how you command the lines, my little fish. Simple. Direct. ---
+    # No more messy shapes and invisible traces.
+    plots_fig.add_hline(y=median_val, line_dash="dash", line_color="purple", annotation_text="Median", 
+                      annotation_position="bottom right", row=1, col=1)
+    plots_fig.add_hline(y=map_val, line_dash="dot", line_color="green", annotation_text="MAP", 
+                      annotation_position="top right", row=1, col=1)
+
+    plots_fig.add_vline(x=median_val, line_dash="dash", line_color="purple", name="Median", row=1, col=2)
+    plots_fig.add_vline(x=map_val, line_dash="dot", line_color="green", name="MAP", row=1, col=2)
 
     if obs_value != "Suppressed":
-        plots_fig.add_shape(type="line", x0=obs_value, x1=obs_value, y0=0, y1=1, xref="x2", yref="paper", line=dict(color="red", dash="solid"))
-        obs_prob_index = np.where(ecdf_x == obs_value)[0]
-        if len(obs_prob_index) > 0:
-            obs_prob = ecdf_y[obs_prob_index[0]]
-            plots_fig.add_trace(go.Scatter(x=[obs_value], y=[obs_prob], mode='markers',
-                marker=dict(color='red', size=12, symbol='star', line=dict(width=1, color='DarkSlateGrey')),
-                name='Observed Value Marker'), row=1, col=2)
+        plots_fig.add_vline(x=obs_value, line_dash="solid", line_color="red", name="Observed", row=1, col=2)
+        # We still want the star marker, it's a nice touch.
+        obs_prob_index = np.searchsorted(ecdf_x, obs_value)
+        obs_prob = ecdf_y[obs_prob_index-1] if obs_prob_index > 0 else 0
+        plots_fig.add_trace(go.Scatter(
+            x=[obs_value], y=[obs_prob], mode='markers',
+            marker=dict(color='red', size=12, symbol='star', line=dict(width=1, color='DarkSlateGrey')),
+            name='Observed Value',
+            hovertemplate='Observed: %{x}<br>Cumulative P: %{y:.3f}<extra></extra>'
+            ), row=1, col=2)
 
-    # --- Add Invisible Traces for a Clean Legend ---
-    plots_fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='Median', line=dict(color='purple', dash='dash')))
-    plots_fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='MAP', line=dict(color='green', dash='dot')))
-    if obs_value != "Suppressed":
-        plots_fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='Observed', line=dict(color='red', dash='solid')))
-
-    # --- Layout Updates ---
-    plots_fig.update_layout(height=450, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+    # --- Final Layout Polish ---
+    plots_fig.update_layout(
+        height=450, 
+        showlegend=True, 
+        legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
+    )
     plots_fig.update_yaxes(title_text="Estimated Count", row=1, col=1)
     plots_fig.update_xaxes(title_text="Iteration (Down-sampled)", row=1, col=1)
     plots_fig.update_yaxes(title_text="Cumulative Probability", range=[-0.05, 1.05], row=1, col=2)

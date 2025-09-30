@@ -14,13 +14,14 @@ The key features of the model are:
 
 1.  **Hierarchical Structure**: The model respects the geographic hierarchy. The national total informs the distribution of counts across TAs, and each TA's total in turn informs the distribution of counts across its constituent SA2s.
 
-2.  **Gibbs Sampling**: The model uses an iterative Gibbs sampler to explore the space of plausible solutions. Instead of finding a single "best" answer, it generates thousands of samples, the average of which is used as the final estimate.
+2.  **Gibbs Sampling**: The model uses an iterative Gibbs sampler to explore the space of plausible solutions. Instead of finding a single "best" answer, it generates thousands of samples from the posterior distribution, the average of which is used as the final estimate.
 
-3.  **Full Data Imputation**: The model does not take any observed value as ground truth. In each iteration of the sampler, it re-estimates the likely true values of the observed data:
-    *   **For Suppressed Values**: The model knows these must be small integers. It imputes them by drawing samples from a **Truncated Poisson distribution** (constrained to be less than 6), informed by the model's current estimates.
-    *   **For Rounded (RR3) Values**: The model knows the true value is close to the observed rounded value. It imputes a new "truer" value by sampling from a small, uniform range (`k-1`, `k`, `k+1`) around the observation.
+3.  **Custom Sampling for Confidentialised Data**: The model addresses the data's uncertainty not by taking any value as ground truth, but by resampling the "true" integer counts in each iteration using samplers that are precisely tailored to the rules of confidentialisation:
 
-This full imputation process allows the model to robustly account for the noise and missingness introduced by the confidentialization process.
+      * **For Suppressed Values**: When a parent TA's value is missing, its value is imputed from a **Poisson distribution** informed by the sum of its children SA2s. Missing child SA2 values are then imputed via a **multinomial distribution** based on their newly sampled parent's total.
+      * **For Rounded (RR3) Values**: The model knows the true value must be one of five integers `{R-2, R-1, R, R+1, R+2}` around the rounded value `R`. It imputes a new "truer" value by drawing from a **custom discrete probability distribution**. This distribution is intelligently weighted, assigning a higher probability to the integer that is most likely given the sum of its children SA2 areas.
+
+This robust sampling strategy allows the model to correctly navigate the noise and missingness introduced by the confidentialization process.
 
 ## File Structure
 
@@ -47,9 +48,10 @@ This full imputation process allows the model to robustly account for the noise 
 ### Dependencies
 
 The script requires the following Python libraries:
-*   `pandas`
-*   `numpy`
-*   `scipy`
+
+  * `pandas`
+  * `numpy`
+  * `scipy`
 
 You can install them via pip:
 `pip install pandas numpy scipy`
@@ -66,12 +68,13 @@ python bayesian_model.py
 
 ## Understanding the Output
 
-The script will save two types of files for each category (e.g., `hh_1002_bed_01_...`) into the `data/outputs/` directory:
+The script will save two types of files for each category (e.g., `hh_1102_bed_01_...`) into the `data/outputs/` directory:
 
 1.  **Summaries (`bayesian_summaries/` folder)**: A `.csv` file containing the final results. Key columns include:
-    *   `OBS_VALUE`: The original, suppressed/rounded value.
-    *   `estimated_count_mean`: The main estimate for the true count (the mean of the posterior samples).
-    *   `ci_95_lower` & `ci_95_upper`: A 95% credible interval, providing a plausible range for the true count.
+
+      * `OBS_VALUE`: The original, suppressed/rounded value.
+      * `estimated_count_mean`: The main estimate for the true count (the mean of the posterior samples).
+      * `ci_95_lower` & `ci_95_upper`: A 95% credible interval, providing a plausible range for the true count.
 
 2.  **Raw Samples (`bayesian_samples/` folder)**: A `.npy` file containing the raw array of posterior samples from the Gibbs sampler. This can be loaded using `numpy.load()` for more detailed analysis, such as plotting the posterior distribution for a specific SA2.
 
@@ -79,9 +82,7 @@ The script will save two types of files for each category (e.g., `hh_1002_bed_01
 
 The plot below shows a sample of the model's output for a single category. It compares the original observed values (x-axis) to the model's estimated mean counts (y-axis).
 
-*   **Blue Circles** represent data that was rounded (RR3). The model often adjusts these values to satisfy the geographic constraints.
-*   **Green Triangles** (at x=-1) represent data that was suppressed. The model imputes these values and provides an estimate with uncertainty.
-*   **Error bars** show the 95% credible interval for each estimate, indicating the model's certainty.
-*   The **dashed line** is the `y=x` line, where no change would have been made.
-
-![Results Comparison Plot](results_comparison.png)
+  * **Blue Circles** represent data that was rounded (RR3). The model often adjusts these values to satisfy the geographic constraints.
+  * **Green Triangles** (at x=-1) represent data that was suppressed. The model imputes these values and provides an estimate with uncertainty.
+  * **Error bars** show the 95% credible interval for each estimate, indicating the model's certainty.
+  * The **dashed line** is the `y=x` line, where no change would have been made.

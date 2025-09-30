@@ -1,13 +1,11 @@
 import numpy as np
 import pandas as pd
 import json
-from scipy.stats import mode
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
 
 # --- CONFIGURATION ---
-# Define the categories and specific SA2 codes you want to feature.
 CURATED_SA2S = {
     'hh_1102_bed_03': [100301, 109800, 126601]
 }
@@ -18,7 +16,6 @@ OUTPUT_FILENAME = "index.html"
 def generate_report_figures(category, sa2_code, data):
     """
     Generates the Plotly Figure objects for a single SA2's diagnostic plots.
-    Returns two separate figures: one for the table, one for the plots.
     """
     summary_stats = data['summary_stats']
     trace_data = data['trace']
@@ -43,23 +40,32 @@ def generate_report_figures(category, sa2_code, data):
     # --- Figure 2: The Diagnostic Plots ---
     plots_fig = make_subplots(rows=1, cols=2, subplot_titles=('Down-Sampled Trace Plot', 'Empirical CDF'))
 
-    plots_fig.add_trace(go.Scatter(y=trace_data, mode='lines', name='Trace', line=dict(color='cornflowerblue')), row=1, col=1)
+    # --- Add Main Traces ---
+    plots_fig.add_trace(go.Scatter(y=trace_data, mode='lines', name='Chain Trace', line=dict(color='cornflowerblue')), row=1, col=1)
     plots_fig.add_trace(go.Scatter(x=ecdf_x, y=ecdf_y, mode='lines', name='ECDF', line_shape='hv', line=dict(color='darkorange')), row=1, col=2)
     
-    plots_fig.add_trace(go.Scatter(x=[0, len(trace_data)], y=[median_val, median_val], mode='lines', name='Median', line=dict(color='purple', dash='dash')), row=1, col=1)
-    plots_fig.add_trace(go.Scatter(x=[0, len(trace_data)], y=[map_val, map_val], mode='lines', name='MAP', line=dict(color='green', dash='dot')), row=1, col=1)
-    plots_fig.add_trace(go.Scatter(x=[median_val, median_val], y=[0, 1], mode='lines', name='Median', line=dict(color='purple', dash='dash'), showlegend=False), row=1, col=2)
-    plots_fig.add_trace(go.Scatter(x=[map_val, map_val], y=[0, 1], mode='lines', name='MAP', line=dict(color='green', dash='dot'), showlegend=False), row=1, col=2)
-    
+    # --- Add Helper Lines as Shapes (more robust than add_hline/vline) ---
+    plots_fig.add_shape(type="line", y0=median_val, y1=median_val, x0=0, x1=1, xref="paper", yref="y1", line=dict(color="purple", dash="dash"))
+    plots_fig.add_shape(type="line", y0=map_val, y1=map_val, x0=0, x1=1, xref="paper", yref="y1", line=dict(color="green", dash="dot"))
+    plots_fig.add_shape(type="line", x0=median_val, x1=median_val, y0=0, y1=1, xref="x2", yref="paper", line=dict(color="purple", dash="dash"))
+    plots_fig.add_shape(type="line", x0=map_val, x1=map_val, y0=0, y1=1, xref="x2", yref="paper", line=dict(color="green", dash="dot"))
+
     if obs_value != "Suppressed":
-        plots_fig.add_trace(go.Scatter(x=[obs_value, obs_value], y=[0, 1], mode='lines', name='Observed', line=dict(color='red', dash='solid')), row=1, col=2)
+        plots_fig.add_shape(type="line", x0=obs_value, x1=obs_value, y0=0, y1=1, xref="x2", yref="paper", line=dict(color="red", dash="solid"))
         obs_prob_index = np.where(ecdf_x == obs_value)[0]
         if len(obs_prob_index) > 0:
             obs_prob = ecdf_y[obs_prob_index[0]]
             plots_fig.add_trace(go.Scatter(x=[obs_value], y=[obs_prob], mode='markers',
                 marker=dict(color='red', size=12, symbol='star', line=dict(width=1, color='DarkSlateGrey')),
-                name='Observed', showlegend=False), row=1, col=2)
+                name='Observed Value Marker'), row=1, col=2)
 
+    # --- Add Invisible Traces for a Clean Legend ---
+    plots_fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='Median', line=dict(color='purple', dash='dash')))
+    plots_fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='MAP', line=dict(color='green', dash='dot')))
+    if obs_value != "Suppressed":
+        plots_fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='Observed', line=dict(color='red', dash='solid')))
+
+    # --- Layout Updates ---
     plots_fig.update_layout(height=450, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
     plots_fig.update_yaxes(title_text="Estimated Count", row=1, col=1)
     plots_fig.update_xaxes(title_text="Iteration (Down-sampled)", row=1, col=1)
@@ -69,19 +75,14 @@ def generate_report_figures(category, sa2_code, data):
     return table_fig, plots_fig
 
 def main():
-    """
-    Main function to generate a single, multi-part HTML report.
-    """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     output_path = os.path.join(OUTPUT_DIR, OUTPUT_FILENAME)
     
-    # Start the HTML file with the plotly.js library
     with open(output_path, 'w') as f:
-        f.write('<html><head><script src="https://cdn.plot.ly/plotly-latest.min.js"></script></head><body>\n')
-
+        f.write('<html><head><title>Bayesian Model Diagnostics</title><script src="https://cdn.plot.ly/plotly-latest.min.js"></script></head><body>\n')
+        
         for category, sa2_codes in CURATED_SA2S.items():
             print(f"Processing category: {category}...")
-            # Load the necessary files for this category
             try:
                 summary_path = f'data/outputs/bayesian_summaries/sa2_summary_{category}.csv'
                 samples_path = f'data/outputs/bayesian_samples/sa2_samples_{category}.npy'
@@ -93,7 +94,6 @@ def main():
 
             for sa2_code in sa2_codes:
                 print(f"  - Generating report for SA2: {sa2_code}")
-                
                 try:
                     sa2_row = summary_df.loc[summary_df['sa2_code'] == sa2_code]
                     sa2_index = sa2_row.index[0]
@@ -101,10 +101,8 @@ def main():
                     print(f"    Warning: SA2 code {sa2_code} not found. Skipping.")
                     continue
 
-                # --- Create the distilled data on the fly ---
                 sa2_chain = posterior_samples[:, sa2_index]
                 obs_value = sa2_row['OBS_VALUE'].iloc[0]
-                
                 x_ecdf, counts = np.unique(sa2_chain, return_counts=True)
                 y_ecdf = np.cumsum(counts) / sa2_chain.size
 
@@ -122,15 +120,14 @@ def main():
                     'ecdf_y': y_ecdf.tolist()
                 }
                 
-                # Generate the figures for this SA2
                 table_fig, plots_fig = generate_report_figures(category, sa2_code, data_for_plot)
                 
-                # Append the HTML of the figures to our single file
+                # Append figures to the single HTML file, wrapped in a div for spacing
+                f.write('<div style="margin-bottom: 50px;">\n')
                 f.write(table_fig.to_html(full_html=False, include_plotlyjs=False))
                 f.write(plots_fig.to_html(full_html=False, include_plotlyjs=False))
-                f.write("<hr>\n") # Add a horizontal line between entries
-
-        # Close the HTML file
+                f.write('</div>\n<hr>\n')
+        
         f.write('</body></html>\n')
     
     print(f"\nHTML report generation complete. File saved to: {output_path}")

@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-from scipy.stats import poisson
+from scipy.stats import poisson, mode
 
 # --- 1. Data Loading and Preparation ---
 
@@ -144,12 +144,12 @@ def run_simultaneous_gibbs_sampler(
 # --- 3. Main Execution ---
 
 if __name__ == "__main__":
-    input_base_dir = "/home/dylan/Documents/stats/data/processed"
-    output_base_dir = "/home/dylan/Documents/stats/data/outputs"
+    input_base_dir = "data/processed"
+    output_base_dir = "data/outputs"
     sa2_path = os.path.join(input_base_dir, "sa2_level_data.csv")
     ta_path = os.path.join(input_base_dir, "ta_level_data.csv")
     national_path = os.path.join(input_base_dir, "national_level_data.csv")
-    map_path = "/home/dylan/Documents/stats/data/classifications/sa2_to_ta_map.csv"
+    map_path = "data/classifications/sa2_to_ta_map.csv"
     summary_output_path = os.path.join(
         output_base_dir, "simultaneous_results_summary.csv"
     )
@@ -181,12 +181,16 @@ if __name__ == "__main__":
 
     # Calculate summary stats (this will be memory efficient)
     mean_estimates = np.mean(all_samples, axis=0)
+    map_estimates = mode(all_samples, axis=0)[0]
     ci_lower = np.percentile(all_samples, 2.5, axis=0)
     ci_upper = np.percentile(all_samples, 97.5, axis=0)
 
     # Create DataFrames from the matrices
     mean_df = pd.DataFrame(
         mean_estimates, index=sa2_wide.index, columns=sa2_wide.columns
+    )
+    map_df = pd.DataFrame(
+        map_estimates, index=sa2_wide.index, columns=sa2_wide.columns
     )
     lower_df = pd.DataFrame(ci_lower, index=sa2_wide.index, columns=sa2_wide.columns)
     upper_df = pd.DataFrame(ci_upper, index=sa2_wide.index, columns=sa2_wide.columns)
@@ -198,6 +202,9 @@ if __name__ == "__main__":
     mean_long = mean_df.reset_index().melt(
         id_vars="area_code", var_name="category", value_name="estimated_count_mean"
     )
+    map_long = map_df.reset_index().melt(
+        id_vars="area_code", var_name="category", value_name="estimated_count_map"
+    )
     lower_long = lower_df.reset_index().melt(
         id_vars="area_code", var_name="category", value_name="ci_95_lower"
     )
@@ -207,10 +214,11 @@ if __name__ == "__main__":
 
     # Merge into a single summary dataframe
     summary_df = pd.merge(obs_long, mean_long, on=["area_code", "category"])
+    summary_df = pd.merge(summary_df, map_long, on=["area_code", "category"])
     summary_df = pd.merge(summary_df, lower_long, on=["area_code", "category"])
     summary_df = pd.merge(summary_df, upper_long, on=["area_code", "category"])
 
-    int_cols = ["estimated_count_mean", "ci_95_lower", "ci_95_upper"]
+    int_cols = ["estimated_count_mean", "estimated_count_map", "ci_95_lower", "ci_95_upper"]
     summary_df[int_cols] = summary_df[int_cols].round().astype(int)
 
     summary_df[["household_composition_code", "num_bedrooms"]] = summary_df[

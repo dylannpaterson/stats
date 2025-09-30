@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-from scipy.stats import poisson
+from scipy.stats import poisson, mode
 
 # --- 1. Data Loading and Preparation ---
 
@@ -44,7 +44,7 @@ def load_and_prepare_data(sa2_level_data, ta_level_data, national_level_data, sa
         value = pd.to_numeric(national_row['OBS_VALUE'].iloc[0], errors='coerce')
         national_total = 0 if pd.isna(value) else value
     else:
-        print("  Warning: National total not found. Using sum of TAs as fallback.")
+        print('  Warning: National total not found. Using sum of TAs as fallback.', flush=True)
         national_total = ta_totals_suppressed.sum()
 
     return df, ta_totals_suppressed, national_total
@@ -100,7 +100,31 @@ def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_t
         # STAGE 1 & 2: Sample true TA and SA2 counts
         ta_dirichlet_params = ta_alpha_prior + current_ta_estimates
         ta_proportions = np.random.dirichlet(ta_dirichlet_params)
-        sampled_ta_totals = np.random.multinomial(int(national_total), ta_proportions)
+
+        # --- Rejection sampling to constrain TA totals ---
+        max_attempts = 100
+        for attempt in range(max_attempts):
+            sampled_ta_totals = np.random.multinomial(int(national_total), ta_proportions)
+            
+            is_compatible = True
+            rounded_ta_idx = np.where(~np.isnan(ta_observed_original))[0]
+            
+            # Check only the rounded (non-suppressed) TAs
+            if not np.all(
+                (ta_observed_original[rounded_ta_idx] - 2 <= sampled_ta_totals[rounded_ta_idx]) &
+                (sampled_ta_totals[rounded_ta_idx] <= ta_observed_original[rounded_ta_idx] + 2)
+            ):
+                is_compatible = False
+            
+            if is_compatible:
+                break
+        
+        if not is_compatible:
+            # If no compatible sample is found, we might just use the last one and warn the user.
+            # This is a simplification. A more robust solution might be needed if this happens often.
+            if i > burn_in: # Only warn after burn-in
+                print(f"Warning: Could not find a compatible TA sample in iteration {i}. Using unconstrained sample.", flush=True)
+
         current_ta_estimates = sampled_ta_totals
 
         sampled_ta_totals_s = pd.Series(sampled_ta_totals, index=ta_totals_suppressed.index)
@@ -123,9 +147,9 @@ def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_t
         if len(missing_ta_idx) > 0:
             imputed_ta_values[missing_ta_idx] = sample_truncated_poisson(lam=current_ta_estimates[missing_ta_idx], k_max=5, size=len(missing_ta_idx))
         if len(rounded_ta_idx) > 0:
-            perturbation = np.random.randint(-1, 2, size=len(rounded_ta_idx))
+            perturbation = np.random.randint(-2, 3, size=len(rounded_ta_idx))
             imputed_ta_values[rounded_ta_idx] = ta_observed_original[rounded_ta_idx] + perturbation
-        ta_alpha_prior = np.maximum(0, imputed_ta_values) + 1
+        ta_alpha_prior = np.maximum(0, imputed_ta_values) + 10
 
         # b) Impute SA2 data
         missing_sa2_idx = np.where(np.isnan(sa2_observed_original))[0]
@@ -135,9 +159,9 @@ def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_t
         if len(missing_sa2_idx) > 0:
             imputed_sa2_values[missing_sa2_idx] = sample_truncated_poisson(lam=current_sa2_estimates[missing_sa2_idx], k_max=5, size=len(missing_sa2_idx))
         if len(rounded_sa2_idx) > 0:
-            perturbation = np.random.randint(-1, 2, size=len(rounded_sa2_idx))
+            perturbation = np.random.randint(-2, 3, size=len(rounded_sa2_idx))
             imputed_sa2_values[rounded_sa2_idx] = sa2_observed_original[rounded_sa2_idx] + perturbation
-        sa2_alpha_prior = np.maximum(0, imputed_sa2_values) + 1
+        sa2_alpha_prior = np.maximum(0, imputed_sa2_values) + 10
 
         # Store samples after burn-in
         if i >= burn_in:
@@ -149,19 +173,19 @@ def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_t
 # --- 3. Main Execution ---
 
 if __name__ == '__main__':
-    input_base_dir = '/home/dylan/Documents/stats/data/processed'
+    input_base_dir = 'data/processed'
     sa2_path = os.path.join(input_base_dir, 'sa2_level_data.csv')
     ta_path = os.path.join(input_base_dir, 'ta_level_data.csv')
     national_path = os.path.join(input_base_dir, 'national_level_data.csv')
-    map_path = '/home/dylan/Documents/stats/data/classifications/sa2_to_ta_map.csv'
-    output_base_dir = '/home/dylan/Documents/stats/data/outputs'
+    map_path = 'data/classifications/sa2_to_ta_map.csv'
+    output_base_dir = 'data/outputs'
     samples_output_dir = os.path.join(output_base_dir, 'bayesian_samples')
     summaries_output_dir = os.path.join(output_base_dir, 'bayesian_summaries')
     os.makedirs(samples_output_dir, exist_ok=True)
     os.makedirs(summaries_output_dir, exist_ok=True)
-    print(f"Outputs will be saved in: \n  {samples_output_dir} \n  {summaries_output_dir}")
+    print(f"Outputs will be saved in: \n  {samples_output_dir} \n  {summaries_output_dir}", flush=True)
 
-    print("\nPre-loading all data files...")
+    print("\nPre-loading all data files...", flush=True)
     sa2_level_data_full = pd.read_csv(sa2_path, dtype=str)
     ta_level_data_full = pd.read_csv(ta_path, dtype=str)
     national_level_data_full = pd.read_csv(national_path, dtype=str)
@@ -170,13 +194,13 @@ if __name__ == '__main__':
     sa2_level_data_full.rename(columns={'area_code': 'sa2_code'}, inplace=True)
 
     category_combinations = ta_level_data_full[['household_composition_code', 'num_bedrooms']].drop_duplicates()
-    print(f"Found {len(category_combinations)} unique categories to model.")
+    print(f"Found {len(category_combinations)} unique categories to model.", flush=True)
 
     for index, row in category_combinations.iterrows():
         hh_code = row['household_composition_code']
         bedroom_code = row['num_bedrooms']
         
-        print(f"\n--- Processing: HH_CODE='{hh_code}', BEDROOM_CODE='{bedroom_code}' ---")
+        print(f"\n--- Processing: HH_CODE='{hh_code}', BEDROOM_CODE='{bedroom_code}' ---", flush=True)
 
         sa2_data, ta_totals_suppressed, national_total = load_and_prepare_data(
             sa2_level_data_full, ta_level_data_full, national_level_data_full, sa2_to_ta_full, hh_code, bedroom_code
@@ -184,41 +208,43 @@ if __name__ == '__main__':
         
         if sa2_data is None: continue
 
-        print(f"  Found {len(sa2_data)} SA2 areas and {len(ta_totals_suppressed)} TAs to model with National Total: {national_total}")
+        print(f"  Found {len(sa2_data)} SA2 areas and {len(ta_totals_suppressed)} TAs to model with National Total: {national_total}", flush=True)
 
         if national_total == 0:
-            print("  National total is 0. Skipping Gibbs sampler as all counts must be 0.")
+            print("  National total is 0. Skipping Gibbs sampler as all counts must be 0.", flush=True)
             continue
 
         sa2_samples, ta_samples = run_full_imputation_gibbs_sampler(
-            sa2_data, ta_totals_suppressed, national_total, n_iter=2000, burn_in=500
+            sa2_data, ta_totals_suppressed, national_total, n_iter=10000, burn_in=1000
         )
         
         # --- Save results ---
         sa2_summary = sa2_data.copy()
         sa2_summary['estimated_count_mean'] = np.mean(sa2_samples, axis=0).round().astype(int)
+        sa2_summary['estimated_count_map'] = mode(sa2_samples, axis=0)[0].round().astype(int)
         sa2_summary['ci_95_lower'] = np.percentile(sa2_samples, 2.5, axis=0).round().astype(int)
         sa2_summary['ci_95_upper'] = np.percentile(sa2_samples, 97.5, axis=0).round().astype(int)
         
         summary_filename = f"sa2_summary_hh_{hh_code}_bed_{bedroom_code}.csv"
         summary_filepath = os.path.join(summaries_output_dir, summary_filename)
         sa2_summary.to_csv(summary_filepath, index=False)
-        print(f"  Saved SA2 summary to {summary_filepath}")
+        print(f"  Saved SA2 summary to {summary_filepath}", flush=True)
 
         samples_filename = f"sa2_samples_hh_{hh_code}_bed_{bedroom_code}.npy"
         samples_filepath = os.path.join(samples_output_dir, samples_filename)
         np.save(samples_filepath, sa2_samples)
-        print(f"  Saved SA2 samples to {samples_filepath}")
+        print(f"  Saved SA2 samples to {samples_filepath}", flush=True)
 
         ta_summary = pd.DataFrame(index=ta_totals_suppressed.index)
         ta_summary['suppressed_count'] = ta_totals_suppressed
         ta_summary['estimated_count_mean'] = np.mean(ta_samples, axis=0).round().astype(int)
+        ta_summary['estimated_count_map'] = mode(ta_samples, axis=0)[0].round().astype(int)
         ta_summary['ci_95_lower'] = np.percentile(ta_samples, 2.5, axis=0).round().astype(int)
         ta_summary['ci_95_upper'] = np.percentile(ta_samples, 97.5, axis=0).round().astype(int)
 
         summary_filename_ta = f"ta_summary_hh_{hh_code}_bed_{bedroom_code}.csv"
         summary_filepath_ta = os.path.join(summaries_output_dir, summary_filename_ta)
         ta_summary.to_csv(summary_filepath_ta)
-        print(f"  Saved TA summary to {summary_filepath_ta}")
+        print(f"  Saved TA summary to {summary_filepath_ta}", flush=True)
 
-    print("\n--- Full Run Complete ---")
+    print("\n--- Full Run Complete ---", flush=True)

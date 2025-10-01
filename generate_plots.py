@@ -188,8 +188,8 @@ def main():
             table_fig.write_html(table_filepath, full_html=True, include_plotlyjs='cdn')
             plots_fig.write_html(plots_filepath, full_html=True, include_plotlyjs='cdn')
             
-            relative_table_path = os.path.join(PLOT_SUBDIR, table_filename)
-            relative_plots_path = os.path.join(PLOT_SUBDIR, plots_filename)
+            relative_table_path = f"{PLOT_SUBDIR}/{table_filename}"
+            relative_plots_path = f"{PLOT_SUBDIR}/{plots_filename}"
             
             index_html_parts.append(f'<div class="plot-container">\n')
             index_html_parts.append(f'  <iframe src="{relative_table_path}" height="300"></iframe>\n')

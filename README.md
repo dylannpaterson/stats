@@ -123,6 +123,10 @@ The script will save two types of files for each category (e.g., `hh_1102_bed_01
 
 ## Results Visualization
 
+For visual confirmation of sampler convergence and a detailed look at the uncertainty estimates, please see the generated HTML report:
+
+Diagnostic Report Link: [[dylannpaterson.github.io](https://dylannpaterson.github.io/stats/)]
+
 The plot below shows a sample of the model's output for a single category. It compares the original observed values (x-axis) to the model's estimated mean counts (y-axis).
 
   * **Blue Circles** represent data that was rounded (RR3). The model often adjusts these values to satisfy the geographic constraints.

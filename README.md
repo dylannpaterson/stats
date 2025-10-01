@@ -23,6 +23,47 @@ The key features of the model are:
 
 This robust sampling strategy allows the model to correctly navigate the noise and missingness introduced by the confidentialization process.
 
+### Model Structure and Flow
+
+The model respects the geographic hierarchy: the national total informs the distribution of counts across TAs, and each TA's total in turn informs the distribution of counts across its constituent SA2s.
+
+Let:
+* $Y_{i,j}$: The true, unobserved count for SA2 $i$ within TA $j$.
+* $X_{j}$: The true, unobserved total count for TA $j$.
+* $T$: The true, unobserved National Total.
+* $O_{i,j}$: The observed (rounded or suppressed) value for SA2 $i$.
+* $O_{j}^{TA}$: The observed (rounded or suppressed) value for TA $j$.
+
+The hierarchy is defined by a series of conditional distributions:
+
+$$
+\begin{align*}
+P(X_1, \dots, X_J | T, \boldsymbol{\alpha}^{TA}) &\sim \text{Multinomial}(T, \boldsymbol{p}^{TA}) \\
+P(Y_{i,j} | X_j, \boldsymbol{\alpha}^{SA2}) &\sim \text{Multinomial}(X_j, \boldsymbol{p}_{j}^{SA2}) \\
+\end{align*}
+$$
+
+Where $\boldsymbol{p}^{TA}$ and $\boldsymbol{p}_{j}^{SA2}$ are the estimated proportions derived from Dirichlet priors (or $\boldsymbol{\alpha}$ parameters) that are updated in each iteration based on the observed data.
+
+### Custom Sampling for Confidentialised Data
+
+The model addresses the data's uncertainty not by taking any value as ground truth, but by resampling the "true" integer counts in each iteration using samplers that are precisely tailored to the rules of confidentialisation.
+
+#### 1. Imputing Suppressed Values (NaNs)
+When a value is suppressed (missing), it is imputed using a Poisson likelihood informed by the current estimate of its sub-components or the overall total.
+
+* **Suppressed TA Total ($O_{j}^{TA} = \text{NaN}$):** The sampled TA total is primarily driven by the **Multinomial draw** from the National total, ensuring the National-level constraint is met.
+* **Suppressed SA2 Count ($O_{i,j} = \text{NaN}$):** The SA2 count is determined by the **Multinomial draw** from its newly sampled parent TA's total.
+
+#### 2. Imputing Rounded (RR3) Values
+When a value $R$ is observed (rounded), the true value $X$ must be in the set $\{R-2, R-1, R, R+1, R+2\}$. The model imputes a new "truer" value by drawing from a **custom discrete probability distribution**.
+
+* **Constrained TA Total ($O_{j}^{TA} = R$):** The true TA total, $X_j$, is resampled from the possible set of five integers. The probability of choosing a specific integer $k$ is intelligently weighted by a Poisson likelihood, whose mean ($\lambda$) is set to the current sum of its constituent SA2 children ($\sum_{i} Y_{i,j}$).
+    $$
+    P(X_j = k | \sum_{i} Y_{i,j}, O_{j}^{TA}=R) \propto \text{Poisson}(k | \lambda = \sum_{i} Y_{i,j}) \cdot \mathbb{I}(k \in \{R\pm 2\})
+    $$
+    This robust sampling strategy allows the model to correctly navigate the noise and missingness introduced by the confidentialization process.
+
 ## File Structure
 
 ```

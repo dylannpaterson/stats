@@ -23,7 +23,7 @@ CATPPUCCIN_MOCHA = {
 # --- CONFIGURATION ---
 OUTPUT_DIR = "docs"
 OUTPUT_FILENAME = "index.html"
-PLOT_SUBDIR = "_plots"
+PLOT_SUBDIR = ""
 
 def _create_step_data(x, y):
     """Helper to create step-plot coordinates."""
@@ -182,14 +182,14 @@ def main():
             
             table_filename = f"{category_code}_{sa2_code}_table.html"
             plots_filename = f"{category_code}_{sa2_code}_plots.html"
-            table_filepath = os.path.join(plots_dir, table_filename)
-            plots_filepath = os.path.join(plots_dir, plots_filename)
+            table_filepath = os.path.join(OUTPUT_DIR, table_filename)
+            plots_filepath = os.path.join(OUTPUT_DIR, plots_filename)
             
             table_fig.write_html(table_filepath, full_html=True, include_plotlyjs='cdn')
             plots_fig.write_html(plots_filepath, full_html=True, include_plotlyjs='cdn')
             
-            relative_table_path = f"./{PLOT_SUBDIR}/{table_filename}"
-            relative_plots_path = f"./{PLOT_SUBDIR}/{plots_filename}"
+            relative_table_path = f"{table_filename}"
+            relative_plots_path = f"{plots_filename}"
             
             index_html_parts.append(f'<div class="plot-container">\n')
             index_html_parts.append(f'  <iframe src="{relative_table_path}" height="300"></iframe>\n')

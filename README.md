@@ -60,11 +60,11 @@ When a value $R$ is observed (rounded), the true value $X$ must be in the set $\
 
 * **Constrained TA Total ($O_{j}^{TA} = R$):** The true TA total, $X_j$, is resampled from the possible set of five integers. The probability of choosing a specific integer $k$ is intelligently weighted by a Poisson likelihood, whose mean ($\lambda$) is set to the current sum of its constituent SA2 children ($\sum_{i} Y_{i,j}$).
 
-    $$ 
-    P(X_j = k | \sum_{i} Y_{i,j}, O_{j}^{TA}=R) \propto \text{Poisson}(k | \lambda = \sum_{i} Y_{i,j}) \cdot \mathbb{I}(k \in \{R\pm 2\})
-    $$
+$$ 
+P(X_j = k | \sum_{i} Y_{i,j}, O_{j}^{TA}=R) \propto \text{Poisson}(k | \lambda = \sum_{i} Y_{i,j}) \cdot \mathbb{I}(k \in \{R\pm 2\})
+$$
 
-    This robust sampling strategy allows the model to correctly navigate the noise and missingness introduced by the confidentialization process.
+This robust sampling strategy allows the model to correctly navigate the noise and missingness introduced by the confidentialization process.
 
 ## File Structure
 

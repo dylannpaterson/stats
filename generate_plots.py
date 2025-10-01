@@ -6,6 +6,20 @@ from plotly.subplots import make_subplots
 import os
 import webbrowser
 
+# --- CATPPUCCIN MOCHA PALETTE ---
+CATPPUCCIN_MOCHA = {
+    'base': '#1e1e2e',       # Background
+    'mantle': '#181825',     # Secondary Background/UI elements
+    'text': '#cdd6f4',       # Primary Text
+    'blue': '#89b4fa',       # Primary Trace (Chain Trace)
+    'lavender': '#b4befe',   # Secondary Trace (ECDF)
+    'green': '#a6e3a1',      # MAP Estimate
+    'mauve': '#cba6f7',      # Median/Table Header
+    'red': '#f38ba8',        # Observed Value
+    'surface0': '#313244',   # Table Cell/Grid line
+    'colorway': ['#89b4fa', '#b4befe', '#a6e3a1', '#f38ba8', '#fab387', '#f9e2af']
+}
+
 # --- CONFIGURATION ---
 OUTPUT_DIR = "docs"
 OUTPUT_FILENAME = "index.html"
@@ -39,55 +53,69 @@ def generate_report_figures(category_code, sa2_code, data, labels_map):
     median_val = summary_stats['Posterior Median']
     map_val = summary_stats['MAP Estimate']
     
-    # --- Figure 1: The Table ---
+    # --- Figure 1: The Table (MOCHA STYLED) ---
     # This figure will now ONLY be used for its data table. The title will be suppressed.
     table_fig = go.Figure(data=[go.Table(
-        header=dict(values=['Statistic', 'Value'], fill_color='paleturquoise', align='left', font=dict(size=14)),
-        cells=dict(values=[list(summary_stats.keys()), list(summary_stats.values())], fill_color='lavender', align='left', font=dict(size=12), height=30)
+        # Apply Mocha colors to header and cells
+        header=dict(values=['Statistic', 'Value'], fill_color=CATPPUCCIN_MOCHA['mauve'], align='left', font=dict(size=14, color=CATPPUCCIN_MOCHA['base'])),
+        cells=dict(values=[list(summary_stats.keys()), list(summary_stats.values())], fill_color=CATPPUCCIN_MOCHA['surface0'], align='left', font=dict(size=12, color=CATPPUCCIN_MOCHA['text']), height=30)
     )])
-    table_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10)) # Minimal margins
+    # Apply Mocha theme to the table figure layout
+    table_fig.update_layout(
+        margin=dict(l=10, r=10, t=10, b=10),
+        plot_bgcolor=CATPPUCCIN_MOCHA['base'],
+        paper_bgcolor=CATPPUCCIN_MOCHA['base'],
+        font=dict(color=CATPPUCCIN_MOCHA['text'])
+    )
 
-    # --- Figure 2: The Plots ---
+    # --- Figure 2: The Plots (MOCHA STYLED) ---
     # We create the subplots WITHOUT any titles.
     plots_fig = make_subplots(rows=1, cols=2)
 
-    # Add traces as before
-    plots_fig.add_trace(go.Scatter(y=trace_data, mode='lines', name='Chain Trace', line=dict(color='cornflowerblue')), row=1, col=1)
+    # Add traces with new Mocha colors
+    plots_fig.add_trace(go.Scatter(y=trace_data, mode='lines', name='Chain Trace', line=dict(color=CATPPUCCIN_MOCHA['blue'])), row=1, col=1)
 
     if len(ecdf_x) > 1:
         x_step, y_step = _create_step_data(ecdf_x, ecdf_y)
-        plots_fig.add_trace(go.Scatter(x=x_step, y=y_step, mode='lines', name='ECDF', line=dict(color='darkorange')), row=1, col=2)
+        plots_fig.add_trace(go.Scatter(x=x_step, y=y_step, mode='lines', name='ECDF', line=dict(color=CATPPUCCIN_MOCHA['lavender'])), row=1, col=2)
     else:
-        plots_fig.add_trace(go.Scatter(x=ecdf_x, y=ecdf_y, mode='markers', name='ECDF (Single Point)', marker=dict(color='darkorange', size=15, symbol='diamond')), row=1, col=2)
+        plots_fig.add_trace(go.Scatter(x=ecdf_x, y=ecdf_y, mode='markers', name='ECDF (Single Point)', marker=dict(color=CATPPUCCIN_MOCHA['lavender'], size=15, symbol='diamond')), row=1, col=2)
 
-    plots_fig.add_hline(y=median_val, line_dash="dash", line_color="purple", name="Median", legendgroup="median", showlegend=True, row=1, col=1)
-    plots_fig.add_hline(y=map_val, line_dash="dot", line_color="green", name="MAP", legendgroup="map", showlegend=True, row=1, col=1)
-    plots_fig.add_trace(go.Scatter(x=[median_val, median_val], y=[0, 1], mode='lines', line_dash="dash", line_color="purple", name="Median", legendgroup="median", showlegend=False), row=1, col=2)
-    plots_fig.add_trace(go.Scatter(x=[map_val, map_val], y=[0, 1], mode='lines', line_dash="dot", line_color="green", name="MAP", legendgroup="map", showlegend=False), row=1, col=2)
+    # Add Horizontal lines with new Mocha colors
+    plots_fig.add_hline(y=median_val, line_dash="dash", line_color=CATPPUCCIN_MOCHA['mauve'], name="Median", legendgroup="median", showlegend=True, row=1, col=1)
+    plots_fig.add_hline(y=map_val, line_dash="dot", line_color=CATPPUCCIN_MOCHA['green'], name="MAP", legendgroup="map", showlegend=True, row=1, col=1)
+    plots_fig.add_trace(go.Scatter(x=[median_val, median_val], y=[0, 1], mode='lines', line_dash="dash", line_color=CATPPUCCIN_MOCHA['mauve'], name="Median", legendgroup="median", showlegend=False), row=1, col=2)
+    plots_fig.add_trace(go.Scatter(x=[map_val, map_val], y=[0, 1], mode='lines', line_dash="dot", line_color=CATPPUCCIN_MOCHA['green'], name="MAP", legendgroup="map", showlegend=False), row=1, col=2)
     
     if obs_value != "Suppressed":
-        plots_fig.add_trace(go.Scatter(x=[obs_value, obs_value], y=[0, 1], mode='lines', line_dash="solid", line_color="red", name="Observed", legendgroup="observed", showlegend=True), row=1, col=2)
+        plots_fig.add_trace(go.Scatter(x=[obs_value, obs_value], y=[0, 1], mode='lines', line_dash="solid", line_color=CATPPUCCIN_MOCHA['red'], name="Observed", legendgroup="observed", showlegend=True), row=1, col=2)
         obs_prob_index = np.searchsorted(ecdf_x, obs_value, side='right')
         obs_prob = ecdf_y[obs_prob_index - 1] if obs_prob_index > 0 else 0
-        plots_fig.add_trace(go.Scatter(x=[obs_value], y=[obs_prob], mode='markers', marker=dict(color='red', size=12, symbol='star'), name='Observed Value', legendgroup="observed", showlegend=False), row=1, col=2)
+        plots_fig.add_trace(go.Scatter(x=[obs_value], y=[obs_prob], mode='markers', marker=dict(color=CATPPUCCIN_MOCHA['red'], size=12, symbol='star'), name='Observed Value', legendgroup="observed", showlegend=False), row=1, col=2)
 
-    # --- THIS IS THE FINAL, CORRECT TITLE LOGIC ---
+    # --- APPLY MOCHA THEME TO LAYOUT ---
     plots_fig.update_layout(
         title_text=clean_title, # Set the main, overarching title for the plots.
         title_font_size=18,
         height=450, 
         showlegend=True, 
         legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
+        # MOCHA THEME APPLICATION
+        plot_bgcolor=CATPPUCCIN_MOCHA['base'],
+        paper_bgcolor=CATPPUCCIN_MOCHA['base'],
+        font=dict(color=CATPPUCCIN_MOCHA['text']),
+        colorway=CATPPUCCIN_MOCHA['colorway'],
         # Manually add the subplot titles as annotations, which cannot be overridden.
         annotations=[
             dict(text="Down-Sampled Trace Plot", x=0.225, xref="paper", y=1.0, yref="paper", showarrow=False, font=dict(size=16)),
             dict(text="Empirical CDF", x=0.775, xref="paper", y=1.0, yref="paper", showarrow=False, font=dict(size=16))
         ]
     )
-    plots_fig.update_yaxes(title_text="Estimated Count", row=1, col=1)
-    plots_fig.update_xaxes(title_text="Iteration (Down-sampled)", row=1, col=1)
-    plots_fig.update_yaxes(title_text="Cumulative Probability", range=[-0.05, 1.05], row=1, col=2)
-    plots_fig.update_xaxes(title_text="Estimated Count", row=1, col=2)
+    # Update axes titles and grid lines
+    plots_fig.update_yaxes(title_text="Estimated Count", row=1, col=1, gridcolor=CATPPUCCIN_MOCHA['surface0'])
+    plots_fig.update_xaxes(title_text="Iteration (Down-sampled)", row=1, col=1, gridcolor=CATPPUCCIN_MOCHA['surface0'])
+    plots_fig.update_yaxes(title_text="Cumulative Probability", range=[-0.05, 1.05], row=1, col=2, gridcolor=CATPPUCCIN_MOCHA['surface0'])
+    plots_fig.update_xaxes(title_text="Estimated Count", row=1, col=2, gridcolor=CATPPUCCIN_MOCHA['surface0'])
     
     return table_fig, plots_fig
 
@@ -110,9 +138,17 @@ def main():
         }
     }
 
+    # --- HTML STRUCTURE AND MOCHA STYLING ---
     index_html_parts = [
         '<html><head><title>Bayesian Model Diagnostics</title>',
-        '<style>body { font-family: sans-serif; line-height: 1.6; color: #333; } iframe { border: none; width: 100%; } .plot-container { margin-bottom: 50px; border-top: 2px solid #ccc; padding-top: 20px; } .intro-text { max-width: 800px; margin: 20px auto; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px;} h2 {border-bottom: 1px solid #ccc; padding-bottom: 10px;}</style>',
+        # Updated inline CSS to use Mocha colors
+        f"""<style>
+        body {{ font-family: sans-serif; line-height: 1.6; color: {CATPPUCCIN_MOCHA['text']}; background-color: {CATPPUCCIN_MOCHA['base']}; }} 
+        iframe {{ border: none; width: 100%; }} 
+        .plot-container {{ margin-bottom: 50px; border-top: 2px solid {CATPPUCCIN_MOCHA['surface0']}; padding-top: 20px; }} 
+        .intro-text {{ max-width: 800px; margin: 20px auto; padding: 10px; background-color: {CATPPUCCIN_MOCHA['mantle']}; border: 1px solid {CATPPUCCIN_MOCHA['surface0']}; border-radius: 5px;}} 
+        h1, h2 {{border-bottom: 1px solid {CATPPUCCIN_MOCHA['surface0']}; padding-bottom: 10px; color: {CATPPUCCIN_MOCHA['text']};}}
+        </style>""",
         '</head><body>\n',
         '<h1>Bayesian Model Diagnostic Report</h1>\n'
     ]

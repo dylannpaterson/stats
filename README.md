@@ -59,9 +59,11 @@ When a value is suppressed (missing), it is imputed using a Poisson likelihood i
 When a value $R$ is observed (rounded), the true value $X$ must be in the set $\{R-2, R-1, R, R+1, R+2\}$. The model imputes a new "truer" value by drawing from a **custom discrete probability distribution**.
 
 * **Constrained TA Total ($O_{j}^{TA} = R$):** The true TA total, $X_j$, is resampled from the possible set of five integers. The probability of choosing a specific integer $k$ is intelligently weighted by a Poisson likelihood, whose mean ($\lambda$) is set to the current sum of its constituent SA2 children ($\sum_{i} Y_{i,j}$).
-    $
+
+    $$ 
     P(X_j = k | \sum_{i} Y_{i,j}, O_{j}^{TA}=R) \propto \text{Poisson}(k | \lambda = \sum_{i} Y_{i,j}) \cdot \mathbb{I}(k \in \{R\pm 2\})
-    $
+    $$
+
     This robust sampling strategy allows the model to correctly navigate the noise and missingness introduced by the confidentialization process.
 
 ## File Structure

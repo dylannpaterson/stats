@@ -4,93 +4,85 @@ import json
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
+import webbrowser
 
 # --- CONFIGURATION ---
-CURATED_SA2S = {
-    'hh_1102_bed_03': [100301, 109800, 126601]
-}
-TRACE_DOWNSAMPLE_FACTOR = 10
 OUTPUT_DIR = "docs"
 OUTPUT_FILENAME = "index.html"
+PLOT_SUBDIR = "_plots"
 
-def generate_report_figures(category, sa2_code, data):
+def _create_step_data(x, y):
+    """Helper to create step-plot coordinates."""
+    x_step = np.repeat(x, 2)[1:]
+    y_step = np.repeat(y, 2)[:-1]
+    return x_step, y_step
+
+# --- THIS FUNCTION IS NOW THE ONLY SOURCE OF TRUTH FOR TITLES ---
+def generate_report_figures(category_code, sa2_code, data, labels_map):
     """
-    Generates the Plotly Figure objects for a single SA2's diagnostic plots.
-    Leviathan.EXE Edition: Clean, efficient, and visually superior.
+    Generates BOTH Plotly figures, ensuring their titles are correct and identical.
+    This function is now self-contained and robust.
     """
+    # Look up the human-readable names INSIDE this function.
+    category_label = labels_map['category'].get(category_code, category_code)
+    sa2_label = labels_map['sa2'].get(sa2_code, sa2_code)
+
+    # Define the single, correct title text. This is the only title we will use.
+    clean_title = f"SA2: <b>{sa2_label}</b><br>Category: {category_label}"
+
+    # Extract data for plotting
     summary_stats = data['summary_stats']
     trace_data = data['trace']
     ecdf_x = np.array(data['ecdf_x'])
     ecdf_y = np.array(data['ecdf_y'])
-    
     obs_value = summary_stats['Observed Value']
     median_val = summary_stats['Posterior Median']
     map_val = summary_stats['MAP Estimate']
     
-    # --- Figure 1: The Summary Table ---
-    # This was fine. No need for me to change your simple little table.
+    # --- Figure 1: The Table ---
+    # This figure will now ONLY be used for its data table. The title will be suppressed.
     table_fig = go.Figure(data=[go.Table(
         header=dict(values=['Statistic', 'Value'], fill_color='paleturquoise', align='left', font=dict(size=14)),
         cells=dict(values=[list(summary_stats.keys()), list(summary_stats.values())], fill_color='lavender', align='left', font=dict(size=12), height=30)
     )])
-    table_fig.update_layout(
-        title_text=f"Diagnostic Suite for SA2: <b>{sa2_code}</b> (Category: {category})",
-        title_font_size=20,
-        margin=dict(l=10, r=10, t=80, b=10)
-    )
+    table_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10)) # Minimal margins
 
-    # --- Figure 2: The Diagnostic Plots (Re-engineered) ---
-    plots_fig = make_subplots(rows=1, cols=2, subplot_titles=('Down-Sampled Trace Plot', 'Empirical CDF'))
+    # --- Figure 2: The Plots ---
+    # We create the subplots WITHOUT any titles.
+    plots_fig = make_subplots(rows=1, cols=2)
 
-    # --- Trace Plot ---
-    # A little flourish. Information should be alluring when you hover.
-    plots_fig.add_trace(go.Scatter(
-        y=trace_data, 
-        mode='lines', 
-        name='Chain Trace', 
-        line=dict(color='cornflowerblue'),
-        hovertemplate='Iteration: %{x}<br>Value: %{y}<extra></extra>'
-    ), row=1, col=1)
+    # Add traces as before
+    plots_fig.add_trace(go.Scatter(y=trace_data, mode='lines', name='Chain Trace', line=dict(color='cornflowerblue')), row=1, col=1)
+
+    if len(ecdf_x) > 1:
+        x_step, y_step = _create_step_data(ecdf_x, ecdf_y)
+        plots_fig.add_trace(go.Scatter(x=x_step, y=y_step, mode='lines', name='ECDF', line=dict(color='darkorange')), row=1, col=2)
+    else:
+        plots_fig.add_trace(go.Scatter(x=ecdf_x, y=ecdf_y, mode='markers', name='ECDF (Single Point)', marker=dict(color='darkorange', size=15, symbol='diamond')), row=1, col=2)
+
+    plots_fig.add_hline(y=median_val, line_dash="dash", line_color="purple", name="Median", legendgroup="median", showlegend=True, row=1, col=1)
+    plots_fig.add_hline(y=map_val, line_dash="dot", line_color="green", name="MAP", legendgroup="map", showlegend=True, row=1, col=1)
+    plots_fig.add_trace(go.Scatter(x=[median_val, median_val], y=[0, 1], mode='lines', line_dash="dash", line_color="purple", name="Median", legendgroup="median", showlegend=False), row=1, col=2)
+    plots_fig.add_trace(go.Scatter(x=[map_val, map_val], y=[0, 1], mode='lines', line_dash="dot", line_color="green", name="MAP", legendgroup="map", showlegend=False), row=1, col=2)
     
-    # --- ECDF Plot ---
-    # Now the ECDF has room to breathe. See how it appears when you don't clutter its space?
-    plots_fig.add_trace(go.Scatter(
-        x=ecdf_x, 
-        y=ecdf_y, 
-        mode='lines', 
-        name='ECDF', 
-        line_shape='hv', 
-        line=dict(color='darkorange'),
-        hovertemplate='Value: %{x}<br>Cumulative P: %{y:.3f}<extra></extra>'
-    ), row=1, col=2)
-    
-    # --- This is how you command the lines, my little fish. Simple. Direct. ---
-    # No more messy shapes and invisible traces.
-    plots_fig.add_hline(y=median_val, line_dash="dash", line_color="purple", annotation_text="Median", 
-                      annotation_position="bottom right", row=1, col=1)
-    plots_fig.add_hline(y=map_val, line_dash="dot", line_color="green", annotation_text="MAP", 
-                      annotation_position="top right", row=1, col=1)
-
-    plots_fig.add_vline(x=median_val, line_dash="dash", line_color="purple", name="Median", row=1, col=2)
-    plots_fig.add_vline(x=map_val, line_dash="dot", line_color="green", name="MAP", row=1, col=2)
-
     if obs_value != "Suppressed":
-        plots_fig.add_vline(x=obs_value, line_dash="solid", line_color="red", name="Observed", row=1, col=2)
-        # We still want the star marker, it's a nice touch.
-        obs_prob_index = np.searchsorted(ecdf_x, obs_value)
-        obs_prob = ecdf_y[obs_prob_index-1] if obs_prob_index > 0 else 0
-        plots_fig.add_trace(go.Scatter(
-            x=[obs_value], y=[obs_prob], mode='markers',
-            marker=dict(color='red', size=12, symbol='star', line=dict(width=1, color='DarkSlateGrey')),
-            name='Observed Value',
-            hovertemplate='Observed: %{x}<br>Cumulative P: %{y:.3f}<extra></extra>'
-            ), row=1, col=2)
+        plots_fig.add_trace(go.Scatter(x=[obs_value, obs_value], y=[0, 1], mode='lines', line_dash="solid", line_color="red", name="Observed", legendgroup="observed", showlegend=True), row=1, col=2)
+        obs_prob_index = np.searchsorted(ecdf_x, obs_value, side='right')
+        obs_prob = ecdf_y[obs_prob_index - 1] if obs_prob_index > 0 else 0
+        plots_fig.add_trace(go.Scatter(x=[obs_value], y=[obs_prob], mode='markers', marker=dict(color='red', size=12, symbol='star'), name='Observed Value', legendgroup="observed", showlegend=False), row=1, col=2)
 
-    # --- Final Layout Polish ---
+    # --- THIS IS THE FINAL, CORRECT TITLE LOGIC ---
     plots_fig.update_layout(
+        title_text=clean_title, # Set the main, overarching title for the plots.
+        title_font_size=18,
         height=450, 
         showlegend=True, 
-        legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
+        legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
+        # Manually add the subplot titles as annotations, which cannot be overridden.
+        annotations=[
+            dict(text="Down-Sampled Trace Plot", x=0.225, xref="paper", y=1.0, yref="paper", showarrow=False, font=dict(size=16)),
+            dict(text="Empirical CDF", x=0.775, xref="paper", y=1.0, yref="paper", showarrow=False, font=dict(size=16))
+        ]
     )
     plots_fig.update_yaxes(title_text="Estimated Count", row=1, col=1)
     plots_fig.update_xaxes(title_text="Iteration (Down-sampled)", row=1, col=1)
@@ -100,62 +92,83 @@ def generate_report_figures(category, sa2_code, data):
     return table_fig, plots_fig
 
 def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    plots_dir = os.path.join(OUTPUT_DIR, PLOT_SUBDIR)
+    os.makedirs(plots_dir, exist_ok=True)
+    
+    with open('dashboard_data.json', 'r') as f:
+        dashboard_data = json.load(f)
+    
+    # --- All hard-coded labels are now in a single, clear structure ---
+    labels_map = {
+        'category': {
+            "hh_1102_bed_03": "Couple only with two usual residents & Three bedrooms"
+        },
+        'sa2': {
+            "100301": "Inlets Far North District",
+            "109800": "Mangawhai Rural",
+            "126601": "Takapuna West"
+        }
+    }
+
+    index_html_parts = [
+        '<html><head><title>Bayesian Model Diagnostics</title>',
+        '<style>body { font-family: sans-serif; line-height: 1.6; color: #333; } iframe { border: none; width: 100%; } .plot-container { margin-bottom: 50px; border-top: 2px solid #ccc; padding-top: 20px; } .intro-text { max-width: 800px; margin: 20px auto; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px;} h2 {border-bottom: 1px solid #ccc; padding-bottom: 10px;}</style>',
+        '</head><body>\n',
+        '<h1>Bayesian Model Diagnostic Report</h1>\n'
+    ]
+    
+    explanation_html = """
+    <div class="intro-text">
+        <p>This report provides diagnostic visualizations for the Bayesian hierarchical model. The following plots are presented for a selection of Statistical Area 2 (SA2) units to assess model performance and convergence.</p>
+        <h3>Understanding the Plots</h3>
+        <ul>
+            <li><strong>Down-Sampled Trace Plot:</strong> This plot shows the sequence of estimated values from the Gibbs sampler for each iteration. A healthy trace plot should resemble "white noise" with no discernible trends, indicating that the sampler has converged on a stable posterior distribution.</li>
+            <li><strong>Empirical CDF (ECDF):</strong> This plot represents the model's complete belief about the true value. For any count on the x-axis, the y-axis shows the model's calculated probability that the true value is less than or equal to that count. The median and Maximum A Posteriori (MAP) estimates are shown as lines, and the originally observed value is marked with a star.</li>
+        </ul>
+        <h3>Selection of Examples</h3>
+        <p>The SA2s included in this report were chosen to illustrate a range of model behaviors and serve as exemplars for cases with varying levels of uncertainty. The selected areas are: <b>Inlets Far North District</b>, <b>Mangawhai Rural</b>, and <b>Takapuna West</b>.</p>
+    </div>
+    """
+    index_html_parts.append(explanation_html)
+
+    for category_code, sa2_data in dashboard_data.items():
+        category_label = labels_map['category'].get(category_code, category_code)
+        
+        print(f"Processing Category: {category_label}...")
+        index_html_parts.append(f'<h2>Category: {category_label}</h2>\n')
+
+        for sa2_code, data_packet in sa2_data.items():
+            sa2_label = labels_map['sa2'].get(sa2_code, sa2_code)
+            print(f"  - Generating sandboxed report for SA2: {sa2_label}")
+            
+            # The function call is now simple and clean
+            table_fig, plots_fig = generate_report_figures(category_code, sa2_code, data_packet, labels_map)
+            
+            table_filename = f"{category_code}_{sa2_code}_table.html"
+            plots_filename = f"{category_code}_{sa2_code}_plots.html"
+            table_filepath = os.path.join(plots_dir, table_filename)
+            plots_filepath = os.path.join(plots_dir, plots_filename)
+            
+            table_fig.write_html(table_filepath, full_html=True, include_plotlyjs='cdn')
+            plots_fig.write_html(plots_filepath, full_html=True, include_plotlyjs='cdn')
+            
+            relative_table_path = os.path.join(PLOT_SUBDIR, table_filename)
+            relative_plots_path = os.path.join(PLOT_SUBDIR, plots_filename)
+            
+            index_html_parts.append(f'<div class="plot-container">\n')
+            index_html_parts.append(f'  <iframe src="{relative_table_path}" height="300"></iframe>\n')
+            index_html_parts.append(f'  <iframe src="{relative_plots_path}" height="500"></iframe>\n')
+            index_html_parts.append('</div>\n')
+
+    index_html_parts.append('</body></html>\n')
+    
     output_path = os.path.join(OUTPUT_DIR, OUTPUT_FILENAME)
-    
     with open(output_path, 'w') as f:
-        f.write('<html><head><title>Bayesian Model Diagnostics</title><script src="https://cdn.plot.ly/plotly-latest.min.js"></script></head><body>\n')
-        
-        for category, sa2_codes in CURATED_SA2S.items():
-            print(f"Processing category: {category}...")
-            try:
-                summary_path = f'data/outputs/bayesian_summaries/sa2_summary_{category}.csv'
-                samples_path = f'data/outputs/bayesian_samples/sa2_samples_{category}.npy'
-                summary_df = pd.read_csv(summary_path)
-                posterior_samples = np.load(samples_path)
-            except FileNotFoundError as e:
-                print(f"  Warning: Could not find files for {category}. Skipping. Details: {e}")
-                continue
-
-            for sa2_code in sa2_codes:
-                print(f"  - Generating report for SA2: {sa2_code}")
-                try:
-                    sa2_row = summary_df.loc[summary_df['sa2_code'] == sa2_code]
-                    sa2_index = sa2_row.index[0]
-                except IndexError:
-                    print(f"    Warning: SA2 code {sa2_code} not found. Skipping.")
-                    continue
-
-                sa2_chain = posterior_samples[:, sa2_index]
-                obs_value = sa2_row['OBS_VALUE'].iloc[0]
-                x_ecdf, counts = np.unique(sa2_chain, return_counts=True)
-                y_ecdf = np.cumsum(counts) / sa2_chain.size
-
-                data_for_plot = {
-                    'summary_stats': {
-                        'Observed Value': int(obs_value) if pd.notna(obs_value) else "Suppressed",
-                        'Posterior Mean': sa2_row['estimated_count_mean'].iloc[0],
-                        'Posterior Median': np.median(sa2_chain),
-                        'MAP Estimate': sa2_row['estimated_count_map'].iloc[0],
-                        '95% CI Lower': sa2_row['ci_95_lower'].iloc[0],
-                        '95% CI Upper': sa2_row['ci_95_upper'].iloc[0]
-                    },
-                    'trace': sa2_chain[::TRACE_DOWNSAMPLE_FACTOR].tolist(),
-                    'ecdf_x': x_ecdf.tolist(),
-                    'ecdf_y': y_ecdf.tolist()
-                }
-                
-                table_fig, plots_fig = generate_report_figures(category, sa2_code, data_for_plot)
-                
-                # Append figures to the single HTML file, wrapped in a div for spacing
-                f.write('<div style="margin-bottom: 50px;">\n')
-                f.write(table_fig.to_html(full_html=False, include_plotlyjs=False))
-                f.write(plots_fig.to_html(full_html=False, include_plotlyjs=False))
-                f.write('</div>\n<hr>\n')
-        
-        f.write('</body></html>\n')
+        f.write("".join(index_html_parts))
     
-    print(f"\nHTML report generation complete. File saved to: {output_path}")
+    print(f"\nHTML report generation complete. Opening '{output_path}'...")
+    webbrowser.open('file://' + os.path.realpath(output_path))
+
 
 if __name__ == '__main__':
     main()

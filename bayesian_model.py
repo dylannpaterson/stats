@@ -27,7 +27,7 @@ def load_and_prepare_data(sa2_level_data, ta_level_data, national_level_data, sa
     df = pd.merge(sa2_filtered, sa2_to_ta, on='sa2_code')
     df = df[df['ta_code'].isin(ta_totals_suppressed.index)]
     df = df.sort_values(by=['ta_code', 'sa2_code']).reset_index(drop=True)
-    
+
     if df.empty:
         return None, None, None
 
@@ -39,7 +39,7 @@ def load_and_prepare_data(sa2_level_data, ta_level_data, national_level_data, sa
         (national_level_data['household_composition_code'] == hh_code_filter) &
         (national_level_data['num_bedrooms'] == bedroom_code_filter)
     ]
-    
+
     if not national_row.empty:
         value = pd.to_numeric(national_row['OBS_VALUE'].iloc[0], errors='coerce')
         national_total = 0 if pd.isna(value) else value
@@ -49,130 +49,138 @@ def load_and_prepare_data(sa2_level_data, ta_level_data, national_level_data, sa
 
     return df, ta_totals_suppressed, national_total
 
-# --- 2. Gibbs Sampler with Full Imputation ---
+# --- 2. Gibbs Sampler with Refined Sampling Logic ---
 
-def sample_truncated_poisson(lam, k_max, size=1):
+def sample_constrained_ta(current_sa2_sum, rounded_ta_observed):
     """
-    Samples from a Poisson distribution truncated at k_max.
-    Vectorized for performance.
+    Samples a single TA value that is consistent with the RR3 rule,
+    weighted by the Poisson probability based on the sum of its children SA2s.
     """
-    k_values = np.arange(k_max + 1)
-    
-    # If lam is a scalar, expand it to an array
-    if np.isscalar(lam):
-        lam = np.full(size, lam)
-    
-    # Calculate PMF for each lambda
-    pmf_matrix = poisson.pmf(k_values[:, np.newaxis], lam)
-    
-    # Normalize PMFs
-    pmf_sum = pmf_matrix.sum(axis=0)
-    # Avoid division by zero for cases where sum is 0
-    pmf_sum[pmf_sum == 0] = 1
-    normalized_pmf = pmf_matrix / pmf_sum
+    if pd.isna(rounded_ta_observed):
+        # If the TA is suppressed (NaN), we sample from a simple Poisson.
+        # This is a reasonable assumption for suppressed data.
+        return np.random.poisson(max(0, current_sa2_sum))
 
-    # Sample for each lambda
-    samples = np.array([np.random.choice(k_values, p=p_col) for p_col in normalized_pmf.T])
-    return samples
+    # Define the menu of 5 possible integer choices based on the RR3 rule
+    valid_integers = np.arange(rounded_ta_observed - 2, rounded_ta_observed + 3)
+    valid_integers = valid_integers[valid_integers >= 0] # Ensure non-negative
+
+    if len(valid_integers) == 0:
+        return 0
+
+    # Calculate the unnormalized probability for each choice using a Poisson PMF
+    # The mean (lambda) of the Poisson is our best guess: the sum of the children SA2s
+    lambda_val = max(0, current_sa2_sum)
+    unnormalized_probs = poisson.pmf(valid_integers, lambda_val)
+
+    # Normalize the probabilities to create a valid distribution
+    total_prob = unnormalized_probs.sum()
+    if total_prob > 0:
+        normalized_probs = unnormalized_probs / total_prob
+    else:
+        # If all probabilities are zero (e.g., lambda is very far from valid_integers),
+        # default to a uniform probability over the valid choices.
+        normalized_probs = np.ones(len(valid_integers)) / len(valid_integers)
+
+    # Roll the weighted die: draw one sample from our custom discrete distribution
+    return np.random.choice(valid_integers, p=normalized_probs)
 
 
-def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_total, n_iter=5000, burn_in=1000):
+def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_total, n_iter=10000, burn_in=2000):
     """
-    Runs a Gibbs sampler that imputes both missing (suppressed) 
-    and noisy (RR3 rounded) data.
+    Runs a Gibbs sampler with a stable, direct sampling method.
     """
     n_sa2s = len(sa2_data)
     n_tas = len(ta_totals_suppressed)
-    
+
     sa2_posterior_samples = np.zeros((n_iter - burn_in, n_sa2s))
     ta_posterior_samples = np.zeros((n_iter - burn_in, n_tas))
 
     sa2_observed_original = sa2_data['OBS_VALUE'].values.copy()
     ta_observed_original = ta_totals_suppressed.values.copy()
-
-    sa2_alpha_prior = np.nan_to_num(sa2_observed_original, nan=3.0) + 1
-    ta_alpha_prior = np.nan_to_num(ta_observed_original, nan=3.0) + 1
     
-    current_sa2_estimates = sa2_alpha_prior.copy()
-    current_ta_estimates = ta_alpha_prior.copy()
+    # --- Priors are now simpler and fixed ---
+    # We use a non-informative prior. Small constant, e.g., 1.
+    sa2_prior = np.full(n_sa2s, 1.0)
+    ta_prior = np.full(n_tas, 1.0)
+
+    # --- Initial State ---
+    # A reasonable starting point for the chain
+    current_sa2_estimates = np.nan_to_num(sa2_observed_original, nan=np.nanmean(sa2_observed_original[~np.isnan(sa2_observed_original)]))
+    current_sa2_estimates = np.maximum(1, current_sa2_estimates)
+    
+    # Group by TA to initialize TA estimates
+    sa2_df_temp = sa2_data.copy()
+    sa2_df_temp['initial_est'] = current_sa2_estimates
+    initial_ta_sums = sa2_df_temp.groupby('ta_code')['initial_est'].sum()
+    initial_ta_sums = initial_ta_sums.reindex(ta_totals_suppressed.index).fillna(0)
+    current_ta_estimates = initial_ta_sums.values
+
 
     for i in range(n_iter):
-        # STAGE 1 & 2: Sample true TA and SA2 counts
-        ta_dirichlet_params = ta_alpha_prior + current_ta_estimates
-        ta_proportions = np.random.dirichlet(ta_dirichlet_params)
-
-        # --- Rejection sampling to constrain TA totals ---
-        max_attempts = 100
-        for attempt in range(max_attempts):
-            sampled_ta_totals = np.random.multinomial(int(national_total), ta_proportions)
-            
-            is_compatible = True
-            rounded_ta_idx = np.where(~np.isnan(ta_observed_original))[0]
-            
-            # Check only the rounded (non-suppressed) TAs
-            if not np.all(
-                (ta_observed_original[rounded_ta_idx] - 2 <= sampled_ta_totals[rounded_ta_idx]) &
-                (sampled_ta_totals[rounded_ta_idx] <= ta_observed_original[rounded_ta_idx] + 2)
-            ):
-                is_compatible = False
-            
-            if is_compatible:
-                break
+        # --- STAGE 1: Sample TA totals ---
+        # This is the new, direct sampling stage. No more rejection sampling.
         
-        if not is_compatible:
-            # If no compatible sample is found, we might just use the last one and warn the user.
-            # This is a simplification. A more robust solution might be needed if this happens often.
-            if i > burn_in: # Only warn after burn-in
-                print(f"Warning: Could not find a compatible TA sample in iteration {i}. Using unconstrained sample.", flush=True)
+        # Grand total proportion sampling
+        ta_proportions = np.random.dirichlet(ta_prior + current_ta_estimates)
+        total_sum = np.random.multinomial(int(national_total), ta_proportions)
 
-        current_ta_estimates = sampled_ta_totals
+        # Now, for each TA that has observed data, we resample it using our
+        # custom discrete sampler to ensure it conforms to RR3 constraints.
+        
+        # Calculate current SA2 sums for each TA
+        sa2_df_temp['current_est'] = current_sa2_estimates
+        current_sa2_sums_by_ta = sa2_df_temp.groupby('ta_code')['current_est'].sum()
+        current_sa2_sums_by_ta = current_sa2_sums_by_ta.reindex(ta_totals_suppressed.index).fillna(0)
 
-        sampled_ta_totals_s = pd.Series(sampled_ta_totals, index=ta_totals_suppressed.index)
-        for ta_code in sampled_ta_totals_s.index:
+        new_ta_estimates = np.zeros_like(current_ta_estimates)
+        for j, ta_code in enumerate(ta_totals_suppressed.index):
+            observed_val = ta_observed_original[j]
+            sa2_sum_for_ta = current_sa2_sums_by_ta[ta_code]
+            
+            # If the TA is suppressed, we trust the multinomial draw more.
+            # If it's observed, we use our constrained sampler.
+            if pd.isna(observed_val):
+                new_ta_estimates[j] = total_sum[j]
+            else:
+                 new_ta_estimates[j] = sample_constrained_ta(sa2_sum_for_ta, observed_val)
+        
+        # Rescale to match national total
+        if new_ta_estimates.sum() > 0:
+            current_ta_estimates = np.round(new_ta_estimates * (national_total / new_ta_estimates.sum())).astype(int)
+        else:
+            current_ta_estimates = new_ta_estimates
+
+        # --- STAGE 2: Sample SA2 counts conditional on TA totals ---
+        for j, ta_code in enumerate(ta_totals_suppressed.index):
             sa2_indices = sa2_data[sa2_data['ta_code'] == ta_code].index
             if len(sa2_indices) == 0: continue
 
-            sa2_dirichlet_params = sa2_alpha_prior[sa2_indices] + current_sa2_estimates[sa2_indices]
-            sa2_proportions = np.random.dirichlet(sa2_dirichlet_params)
-            sa2_total_for_ta = sampled_ta_totals_s[ta_code]
+            # The prior here can be informed by the observed SA2 data if available
+            sa2_sub_prior = np.nan_to_num(sa2_observed_original[sa2_indices], nan=1.0) + 1.0
+
+            dirichlet_params = sa2_sub_prior + current_sa2_estimates[sa2_indices]
+            
+            # Ensure params are positive
+            dirichlet_params[dirichlet_params <= 0] = 1e-9
+
+            sa2_proportions = np.random.dirichlet(dirichlet_params)
+            sa2_total_for_ta = current_ta_estimates[j]
+            
             new_sa2_counts = np.random.multinomial(int(sa2_total_for_ta), sa2_proportions)
             current_sa2_estimates[sa2_indices] = new_sa2_counts
-
-        # STAGE 3: Impute observed data to inform the next iteration's prior
-        # a) Impute TA data
-        missing_ta_idx = np.where(np.isnan(ta_observed_original))[0]
-        rounded_ta_idx = np.where(~np.isnan(ta_observed_original))[0]
-        
-        imputed_ta_values = np.zeros_like(ta_alpha_prior)
-        if len(missing_ta_idx) > 0:
-            imputed_ta_values[missing_ta_idx] = sample_truncated_poisson(lam=current_ta_estimates[missing_ta_idx], k_max=5, size=len(missing_ta_idx))
-        if len(rounded_ta_idx) > 0:
-            perturbation = np.random.randint(-2, 3, size=len(rounded_ta_idx))
-            imputed_ta_values[rounded_ta_idx] = ta_observed_original[rounded_ta_idx] + perturbation
-        ta_alpha_prior = np.maximum(0, imputed_ta_values) + 10
-
-        # b) Impute SA2 data
-        missing_sa2_idx = np.where(np.isnan(sa2_observed_original))[0]
-        rounded_sa2_idx = np.where(~np.isnan(sa2_observed_original))[0]
-
-        imputed_sa2_values = np.zeros_like(sa2_alpha_prior)
-        if len(missing_sa2_idx) > 0:
-            imputed_sa2_values[missing_sa2_idx] = sample_truncated_poisson(lam=current_sa2_estimates[missing_sa2_idx], k_max=5, size=len(missing_sa2_idx))
-        if len(rounded_sa2_idx) > 0:
-            perturbation = np.random.randint(-2, 3, size=len(rounded_sa2_idx))
-            imputed_sa2_values[rounded_sa2_idx] = sa2_observed_original[rounded_sa2_idx] + perturbation
-        sa2_alpha_prior = np.maximum(0, imputed_sa2_values) + 10
 
         # Store samples after burn-in
         if i >= burn_in:
             sa2_posterior_samples[i - burn_in, :] = current_sa2_estimates
             ta_posterior_samples[i - burn_in, :] = current_ta_estimates
-            
+
     return sa2_posterior_samples, ta_posterior_samples
 
-# --- 3. Main Execution ---
 
+# --- 3. Main Execution ---
 if __name__ == '__main__':
+    # (The main execution block remains unchanged as it handles I/O and orchestration)
     input_base_dir = 'data/processed'
     sa2_path = os.path.join(input_base_dir, 'sa2_level_data.csv')
     ta_path = os.path.join(input_base_dir, 'ta_level_data.csv')
@@ -215,13 +223,14 @@ if __name__ == '__main__':
             continue
 
         sa2_samples, ta_samples = run_full_imputation_gibbs_sampler(
-            sa2_data, ta_totals_suppressed, national_total, n_iter=10000, burn_in=1000
+            sa2_data, ta_totals_suppressed, national_total, n_iter=10000, burn_in=2000
         )
         
         # --- Save results ---
         sa2_summary = sa2_data.copy()
         sa2_summary['estimated_count_mean'] = np.mean(sa2_samples, axis=0).round().astype(int)
-        sa2_summary['estimated_count_map'] = mode(sa2_samples, axis=0)[0].round().astype(int)
+        sa2_summary['estimated_count_median'] = np.percentile(sa2_samples, 50.0, axis=0).round().astype(int)
+        sa2_summary['estimated_count_map'] = mode(sa2_samples, axis=0, keepdims=True)[0][0].round().astype(int)
         sa2_summary['ci_95_lower'] = np.percentile(sa2_samples, 2.5, axis=0).round().astype(int)
         sa2_summary['ci_95_upper'] = np.percentile(sa2_samples, 97.5, axis=0).round().astype(int)
         
@@ -230,15 +239,16 @@ if __name__ == '__main__':
         sa2_summary.to_csv(summary_filepath, index=False)
         print(f"  Saved SA2 summary to {summary_filepath}", flush=True)
 
-        samples_filename = f"sa2_samples_hh_{hh_code}_bed_{bedroom_code}.npy"
-        samples_filepath = os.path.join(samples_output_dir, samples_filename)
-        np.save(samples_filepath, sa2_samples)
-        print(f"  Saved SA2 samples to {samples_filepath}", flush=True)
+        # samples_filename = f"sa2_samples_hh_{hh_code}_bed_{bedroom_code}.npy"
+        # samples_filepath = os.path.join(samples_output_dir, samples_filename)
+        # np.save(samples_filepath, sa2_samples)
+        # print(f"  Saved SA2 samples to {samples_filepath}", flush=True)
 
         ta_summary = pd.DataFrame(index=ta_totals_suppressed.index)
         ta_summary['suppressed_count'] = ta_totals_suppressed
         ta_summary['estimated_count_mean'] = np.mean(ta_samples, axis=0).round().astype(int)
-        ta_summary['estimated_count_map'] = mode(ta_samples, axis=0)[0].round().astype(int)
+        ta_summary['estimated_count_median'] = np.percentile(ta_samples, 50.0, axis=0).round().astype(int)
+        ta_summary['estimated_count_map'] = mode(ta_samples, axis=0, keepdims=True)[0][0].round().astype(int)
         ta_summary['ci_95_lower'] = np.percentile(ta_samples, 2.5, axis=0).round().astype(int)
         ta_summary['ci_95_upper'] = np.percentile(ta_samples, 97.5, axis=0).round().astype(int)
 

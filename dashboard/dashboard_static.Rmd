@@ -1,3 +1,4 @@
+
 ---
 title: "Household Estimates Dashboard"
 output:
@@ -17,6 +18,12 @@ library(crosstalk)
 # Read the data
 ta_data <- read_csv("../data/outputs/combined_ta_summary.csv")
 sa2_data <- read_csv("../data/outputs/combined_sa2_summary.csv")
+
+# Convert to factors
+ta_data$household_composition_code <- as.factor(ta_data$household_composition_code)
+ta_data$num_bedrooms <- as.factor(ta_data$num_bedrooms)
+sa2_data$household_composition_code <- as.factor(sa2_data$household_composition_code)
+sa2_data$num_bedrooms <- as.factor(sa2_data$num_bedrooms)
 
 # Create a shared data object
 shared_data <- SharedData$new(sa2_data, key = ~ta_code)
@@ -54,13 +61,15 @@ Column {data-width=750}
 
   # Create the plot
   p <- ggplot(shared_plot_data, aes(x = household_composition_code)) +
-    geom_bar(aes(y = ta_model_mean, fill = "TA Model Mean"), stat = "identity", alpha = 0.5) +
-    geom_bar(aes(y = sa2_model_mean_sum, fill = "SA2 Model Mean Sum"), stat = "identity", alpha = 0.5) +
-    facet_wrap(~num_bedrooms) +
-    labs(title = "Comparison for selected TA",
+    geom_bar(aes(y = ta_model_mean, fill = "TA Model Mean"), stat = "identity", position = "dodge") +
+    geom_bar(aes(y = sa2_model_mean_sum, fill = "SA2 Model Mean Sum"), stat = "identity", position = "dodge") +
+    facet_wrap(~num_bedrooms, scales = "free_y") +
+    labs(title = "TA vs SA2 Model Mean Comparison",
          x = "Household Composition Code",
-         y = "Count") +
-    theme_minimal()
+         y = "Sum of Estimated Count Mean",
+         fill = "Data Source") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
   ggplotly(p)
 

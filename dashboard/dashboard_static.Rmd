@@ -1,0 +1,67 @@
+---
+title: "Household Estimates Dashboard"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(crosstalk)
+
+# Read the data
+ta_data <- read_csv("../data/outputs/combined_ta_summary.csv")
+sa2_data <- read_csv("../data/outputs/combined_sa2_summary.csv")
+
+# Create a shared data object
+shared_data <- SharedData$new(sa2_data, key = ~ta_code)
+```
+
+Column {data-width=250}
+-----------------------------------------------------------------------
+
+### Inputs
+
+```{r}
+filter_select("selected_ta", "Select a TA", shared_data, ~ta_code)
+```
+
+Column {data-width=750}
+-----------------------------------------------------------------------
+
+### TA vs SA2 Comparison
+
+```{r}
+# Create the plot
+
+  # Summarize SA2 data
+  sa2_summary <- sa2_data %>%
+    group_by(ta_code, household_composition_code, num_bedrooms) %>%
+    summarise(sa2_model_mean_sum = sum(estimated_count_mean))
+
+  # Join data
+  comparison_data <- ta_data %>%
+    select(area_code, household_composition_code, num_bedrooms, ta_model_mean = estimated_count_mean) %>%
+    left_join(sa2_summary, by = c("area_code" = "ta_code", "household_composition_code", "num_bedrooms"))
+
+  # Create a shared data object for the plot
+  shared_plot_data <- SharedData$new(comparison_data, key = ~area_code)
+
+  # Create the plot
+  p <- ggplot(shared_plot_data, aes(x = household_composition_code)) +
+    geom_bar(aes(y = ta_model_mean, fill = "TA Model Mean"), stat = "identity", alpha = 0.5) +
+    geom_bar(aes(y = sa2_model_mean_sum, fill = "SA2 Model Mean Sum"), stat = "identity", alpha = 0.5) +
+    facet_wrap(~num_bedrooms) +
+    labs(title = "Comparison for selected TA",
+         x = "Household Composition Code",
+         y = "Count") +
+    theme_minimal()
+
+  ggplotly(p)
+
+```

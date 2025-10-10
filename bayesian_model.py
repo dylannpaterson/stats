@@ -68,22 +68,8 @@ def sample_constrained_ta(current_sa2_sum, rounded_ta_observed):
     if len(valid_integers) == 0:
         return 0
 
-    # Calculate the unnormalized probability for each choice using a Poisson PMF
-    # The mean (lambda) of the Poisson is our best guess: the sum of the children SA2s
-    lambda_val = max(0, current_sa2_sum)
-    unnormalized_probs = poisson.pmf(valid_integers, lambda_val)
-
-    # Normalize the probabilities to create a valid distribution
-    total_prob = unnormalized_probs.sum()
-    if total_prob > 0:
-        normalized_probs = unnormalized_probs / total_prob
-    else:
-        # If all probabilities are zero (e.g., lambda is very far from valid_integers),
-        # default to a uniform probability over the valid choices.
-        normalized_probs = np.ones(len(valid_integers)) / len(valid_integers)
-
-    # Roll the weighted die: draw one sample from our custom discrete distribution
-    return np.random.choice(valid_integers, p=normalized_probs)
+    # Roll a fair die: draw one sample uniformly from the valid choices.
+    return np.random.choice(valid_integers)
 
 
 def run_full_imputation_gibbs_sampler(sa2_data, ta_totals_suppressed, national_total, n_iter=10000, burn_in=2000):

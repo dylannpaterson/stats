@@ -1,0 +1,60 @@
+
+---
+title: "Household Estimates Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+
+# Read the data
+data <- read_csv("../data/outputs/combined_ta_summary.csv")
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Distribution of Estimated Household Count
+
+```{r}
+# Create the first plot
+p1 <- ggplot(data, aes(x = estimated_count_mean)) +
+    geom_histogram(bins = 30) +
+    facet_wrap(~num_bedrooms, scales = "free") +
+    labs(title = "Distribution of Estimated Household Count by Number of Bedrooms",
+         x = "Estimated Count Mean",
+         y = "Frequency") +
+    theme_minimal()
+
+
+
+ggplotly(p1)
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Mean Estimated Household Count by Composition
+
+```{r}
+# Create the second plot
+p2 <- data %>%
+    group_by(household_composition_code) %>%
+    summarise(mean_estimated_count = mean(estimated_count_mean)) %>%
+    ggplot(aes(x = household_composition_code, y = mean_estimated_count)) +
+    geom_bar(stat = "identity") +
+    labs(title = "Mean Estimated Household Count by Composition Code",
+         x = "Household Composition Code",
+         y = "Mean Estimated Count") +
+    theme_minimal()
+
+
+ggplotly(p2)
+```

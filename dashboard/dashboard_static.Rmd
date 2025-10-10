@@ -1,4 +1,3 @@
-
 ---
 title: "Household Estimates Dashboard"
 output:
@@ -14,6 +13,7 @@ library(ggplot2)
 library(plotly)
 library(dplyr)
 library(crosstalk)
+library(tidyr)
 
 # Read the data
 ta_data <- read_csv("../data/outputs/combined_ta_summary.csv")
@@ -25,52 +25,46 @@ ta_data$num_bedrooms <- as.factor(ta_data$num_bedrooms)
 sa2_data$household_composition_code <- as.factor(sa2_data$household_composition_code)
 sa2_data$num_bedrooms <- as.factor(sa2_data$num_bedrooms)
 
+# Summarize SA2 data
+sa2_summary <- sa2_data %>%
+  group_by(ta_code, household_composition_code, num_bedrooms) %>%
+  summarise(sa2_obs_value_sum = sum(OBS_VALUE, na.rm = TRUE),
+            sa2_model_mean_sum = sum(estimated_count_mean, na.rm = TRUE))
+
+# Summarize TA data
+ta_summary <- ta_data %>%
+  group_by(area_code, household_composition_code, num_bedrooms) %>%
+  summarise(ta_suppressed_count = sum(suppressed_count, na.rm = TRUE),
+            ta_model_mean = sum(estimated_count_mean, na.rm = TRUE))
+
+# Join data
+comparison_data <- ta_summary %>%
+  left_join(sa2_summary, by = c("area_code" = "ta_code", "household_composition_code", "num_bedrooms"))
+
+# Reshape data
+long_comparison_data <- comparison_data %>%
+  pivot_longer(cols = c(ta_suppressed_count, sa2_obs_value_sum, ta_model_mean, sa2_model_mean_sum),
+               names_to = "data_source",
+               values_to = "count")
+
 # Create a shared data object
-shared_data <- SharedData$new(sa2_data, key = ~ta_code)
+shared_data <- SharedData$new(long_comparison_data, key = ~area_code)
+
 ```
 
-Column {data-width=250}
------------------------------------------------------------------------
-
-### Inputs
-
-```{r}
-filter_select("selected_ta", "Select a TA", shared_data, ~ta_code)
-```
-
-Column {data-width=750}
------------------------------------------------------------------------
-
-### TA vs SA2 Comparison
-
-```{r}
-# Create the plot
-
-  # Summarize SA2 data
-  sa2_summary <- sa2_data %>%
-    group_by(ta_code, household_composition_code, num_bedrooms) %>%
-    summarise(sa2_model_mean_sum = sum(estimated_count_mean))
-
-  # Join data
-  comparison_data <- ta_data %>%
-    select(area_code, household_composition_code, num_bedrooms, ta_model_mean = estimated_count_mean) %>%
-    left_join(sa2_summary, by = c("area_code" = "ta_code", "household_composition_code", "num_bedrooms"))
-
-  # Create a shared data object for the plot
-  shared_plot_data <- SharedData$new(comparison_data, key = ~area_code)
-
-  # Create the plot
-  p <- ggplot(shared_plot_data, aes(x = household_composition_code)) +
-    geom_bar(aes(y = ta_model_mean, fill = "TA Model Mean"), stat = "identity", position = "dodge") +
-    geom_bar(aes(y = sa2_model_mean_sum, fill = "SA2 Model Mean Sum"), stat = "identity", position = "dodge") +
-    facet_wrap(~num_bedrooms, scales = "free_y") +
-    labs(title = "TA vs SA2 Model Mean Comparison",
-         x = "Household Composition Code",
-         y = "Sum of Estimated Count Mean",
-         fill = "Data Source") +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-  ggplotly(p)
-
+```{r, echo=FALSE}
+bscols(
+  widths = c(3, 9),
+  filter_select("selected_ta", "Select a TA", shared_data, ~area_code, multiple = FALSE),
+  ggplotly(
+    ggplot(shared_data, aes(x = num_bedrooms, y = count, fill = data_source)) +
+      geom_bar(stat = "identity", position = "dodge") +
+      labs(title = "TA vs SA2 Comparison",
+           x = "Number of Bedrooms",
+           y = "Count",
+           fill = "Data Source") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  )
+)
 ```
